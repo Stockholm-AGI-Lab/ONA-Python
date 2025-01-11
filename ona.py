@@ -22,10 +22,10 @@ IMPLICATION_TABLE_SIZE_MAX = 30  # global implication table size
 EVENT_FIFO_SIZE_MAX = 20
 
 ops = ["^left", "^right"]
-eventFIFO = []
-implicationTable = []
-goalPQ = []
-currentTime = 1.0
+event_fifo = []
+implication_table = []
+goal_pq = []
+current_time = 1.0
 
 
 def truth_deduction(v1, v2):
@@ -68,17 +68,19 @@ def truth_eternalize(v):
     f, c = v
     return (f, truth_w2c(c))
 
-def temporal_op_induction(event1, operator, event2):
-    (term1, occurrence_time1, truth1) = event1
-    (term2, occurrence_time2, truth2) = event2
-    (term_op, occurrence_time3, truth3) = operator
+def temporal_op_induction(antecedent_event, temporal_op, consequent_event):
+    (term_a, time_a, truth_a) = antecedent_event
+    (term_b, time_b, truth_b) = consequent_event
+    (term_op, time_op, truth_op) = temporal_op
+    
     # TODO include op in calculation
-    truth2_to_op = truth_projection(truth2, occurrence_time2, occurrence_time3)
-    truth23 = truth_intersection(truth2_to_op, truth3)
-    truth23_to_1 = truth_projection(truth23, occurrence_time3, occurrence_time1)
-    truth = truth_eternalize(truth_induction(truth1, truth23_to_1))
-    # 2* to distinguish (a =/> b) from (b =/> a)
-    return ((term2, term_op, term1), truth)
+    truth_b_projected = truth_projection(truth_b, time_b, time_op)
+    combined_truth = truth_intersection(truth_b_projected, truth_op)
+    projected_to_a = truth_projection(combined_truth, time_op, time_a)
+    final_truth = truth_eternalize(truth_induction(truth_a, projected_to_a))
+    
+    # (term_b, term_op, term_a) to distinguish (a => b) from (b => a)
+    return ((term_b, term_op, term_a), final_truth)
 
 def truth_c2w(c):
     return TRUTH_EVIDENTIAL_HORIZON * c / (1 - c)
@@ -105,16 +107,16 @@ def anticipation():
     """
     Find all implications whose preconditions are fulfilled according to the implication table.
     """
-    global implicationTable
+    global implication_table
 #    print("DEBUG")
 #    print("Implication table: ")
-#    print(implicationTable)
-    if len(eventFIFO) < 2:
+#    print(implication_table)
+    if len(event_fifo) < 2:
         return
-    (termLast, occurrenceLast, truthLast) = eventFIFO[-1]
-    (termLastLast, occurrenceLastLast, truthLastLast) = eventFIFO[-2]
-    for i in range(len(implicationTable)):
-        currentImplication = implicationTable[i]
+    (termLast, occurrenceLast, truthLast) = event_fifo[-1]
+    (termLastLast, occurrenceLastLast, truthLastLast) = event_fifo[-2]
+    for i in range(len(implication_table)):
+        currentImplication = implication_table[i]
 #        print("DEBUG")
 #        print("current implication: ")
 #        print(currentImplication)
@@ -127,56 +129,56 @@ def anticipation():
         else:
             revisedImplication = currentImplication
         if isMatched:
-            implicationTable[i] = revisedImplication
+            implication_table[i] = revisedImplication
 
 def NAR_AddInputBelief(eventTerm, frequency=1.0, confidence=0.9, Volume=0):
-    global eventFIFO, implicationTable, currentTime
-    event = (eventTerm, currentTime, (frequency, confidence))
+    global event_fifo, implication_table, current_time
+    event = (eventTerm, current_time, (frequency, confidence))
     print("Input:", str(event) + str(". :|:"))
-    for i in range(1, len(eventFIFO)):
-        lastEvent = eventFIFO[i]
-        if lastEvent[0] in ops and event[0] not in ops and eventFIFO[i-1][0] not in ops:
+    for i in range(1, len(event_fifo)):
+        lastEvent = event_fifo[i]
+        if lastEvent[0] in ops and event[0] not in ops and event_fifo[i-1][0] not in ops:
             newImplication = temporal_op_induction(
-                event, lastEvent, eventFIFO[i-1])
+                event, lastEvent, event_fifo[i-1])
             ((pre, op, cons), (f, c)) = newImplication
             if c > 0 and Volume == 100:
                 print("Derived: ", newImplication)
             T1 = (f, c)
             revised = False
-            for i, (term2, _) in enumerate(implicationTable):
+            for i, (term2, _) in enumerate(implication_table):
                 if (pre, op, cons) == term2:
-                    implicationTable[i] = implication_revision(
-                        newImplication, implicationTable[i])
+                    implication_table[i] = implication_revision(
+                        newImplication, implication_table[i])
                     revised = True
             if not revised:
-                implicationTable.append(newImplication)
-                implicationTable = implicationTable[:IMPLICATION_TABLE_SIZE_MAX]
-            implicationTable.sort(key=lambda x: x[0])
-    eventFIFO.append(event)
+                implication_table.append(newImplication)
+                implication_table = implication_table[:IMPLICATION_TABLE_SIZE_MAX]
+            implication_table.sort(key=lambda x: x[0])
+    event_fifo.append(event)
     # remove first elements, since we appended event
-    eventFIFO = eventFIFO[-EVENT_FIFO_SIZE_MAX:]
-    currentTime += 1
+    event_fifo = event_fifo[-EVENT_FIFO_SIZE_MAX:]
+    current_time += 1
     anticipation()
 
 
 def NAR_Cycle():  # decision making rule
-    global goalPQ, currentTime
+    global goal_pq, current_time
 #    print("DEBUG cycle position 1")
 #    print("Goal PQ: ")
-#    print(goalPQ)
+#    print(goal_pq)
     decision = (0.0, 0.0)
-    if not goalPQ:
-        currentTime += 1
+    if not goal_pq:
+        current_time += 1
         return decision
-    bestGoal = goalPQ[0]  # take out first element from goalPQ
-    goalPQ = goalPQ[1:]  # with removal
+    bestGoal = goal_pq[0]  # take out first element from goalPQ
+    goal_pq = goal_pq[1:]  # with removal
     (_, (goalterm, occurrenceTime, desireGoal)) = bestGoal
     derivedGoals = []
-    for i in range(len(implicationTable)):
+    for i in range(len(implication_table)):
         ((precondition, operation, consequence),
-         truthImpl) = implicationTable[i]
+         truthImpl) = implication_table[i]
         # pick the newest events with goalterm matching the preconditiong
-        preconEvents = [x for x in eventFIFO if x[0] == precondition]
+        preconEvents = [x for x in event_fifo if x[0] == precondition]
         if len(preconEvents) == 0 or consequence != goalterm:  # if existent
             continue
         # by sorting according to occurrence time
@@ -185,41 +187,41 @@ def NAR_Cycle():  # decision making rule
         (preconTerm, preconOccurrence, truthPrecon) = preconEvents[-1]
         desirePrecondAndOp = truth_deduction(truthImpl, desireGoal)  # (a, op)!
         opDesireExp = truth_expectation(truth_deduction(
-            desirePrecondAndOp, truth_projection(truthPrecon, preconOccurrence, currentTime)))
+            desirePrecondAndOp, truth_projection(truthPrecon, preconOccurrence, current_time)))
         isBetterDecision = operation in ops and opDesireExp > decision[1]
         if isBetterDecision and opDesireExp > DECISION_THRESHOLD:
             decision = (operation, opDesireExp)
         desireSubgoal = truth_deduction(desirePrecondAndOp, (1.0, 0.9))
         derivedGoals.append((truth_expectation(desireSubgoal),
-                            (precondition, currentTime, desireSubgoal)))
+                            (precondition, current_time, desireSubgoal)))
     if decision[0] != 0.0:  # decision above threshold found?
-        goalPQ = []
+        goal_pq = []
     else:
-        goalPQ = goalPQ + derivedGoals
-        goalPQ.sort(key=lambda x: x[0])  # again sort by desire exp
+        goal_pq = goal_pq + derivedGoals
+        goal_pq.sort(key=lambda x: x[0])  # again sort by desire exp
     if myrand() % BABBLING_CHANCE == 0 and decision[1] < BABBLE_DEACTIVATE_EXP:
         decision = (ops[myrand() % len(ops)], 1.0)
     if decision[0] != 0.0:  # a decision was made, add feedback event
         NAR_AddInputBelief(decision[0], 1.0, 0.9)
 #    print("DEBUG cycle position 2")
 #    print("Goal PQ: ")
-#    print(goalPQ)
-    currentTime += 1
+#    print(goal_pq)
+    current_time += 1
     return decision
 
 def NAR_AddInputGoal(eventTerm, frequency=1.0, confidence=0.9, requires_grad=False):
-    global goalPQ
+    global goal_pq
 #    print("DEBUG input goal position 1")
 #    print("Goal PQ: ")
-#    print(goalPQ)
-    goal = (eventTerm, currentTime, (frequency, confidence))
+#    print(goal_pq)
+    goal = (eventTerm, current_time, (frequency, confidence))
     print("Input:", str(goal) + "! :|:")
-    goalPQ.append((truth_expectation((frequency, confidence)), goal))
-    goalPQ = goalPQ[:GOAL_PQ_SIZE_MAX]
-    goalPQ.sort(key=lambda x: x)
+    goal_pq.append((truth_expectation((frequency, confidence)), goal))
+    goal_pq = goal_pq[:GOAL_PQ_SIZE_MAX]
+    goal_pq.sort(key=lambda x: x)
 #    print("DEBUG input goal position 2")
 #    print("Goal PQ: ")
-#    print(goalPQ)
+#    print(goal_pq)
     return NAR_Cycle()
 
 
